@@ -80,6 +80,10 @@ class MemberRow < Scraped::HTML
     tds[3].text.tidy
   end
 
+  field :source do
+    url
+  end
+
   private
 
   def tds
