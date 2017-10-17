@@ -1,71 +1,99 @@
 #!/bin/env ruby
 # encoding: utf-8
+# frozen_string_literal: true
 
+require 'pry'
+require 'scraped'
 require 'scraperwiki'
-require 'nokogiri'
-require 'date'
-require 'open-uri'
-require 'date'
-require 'csv'
 
-# require 'colorize'
-# require 'pry'
-# require 'csv'
-# require 'open-uri/cached'
-# OpenURI::Cache.cache_path = '.cache'
+# require 'open-uri/cached'
+# OpenURI::Cache.cache_path = '.cache'
 
-def noko_for(url)
-  Nokogiri::HTML(open(url).read) 
+def scraper(h)
+  url, klass = h.to_a.first
+  klass.new(response: Scraped::Request.new(url: url).response)
 end
 
-def datefrom(date)
-  Date.parse(date)
+class MembersPage < Scraped::HTML
+  field :members do
+    noko.css('table.table-striped tbody tr').map { |mp| fragment mp => MemberRow }
+  end
 end
 
-def scrape_list(url)
-  warn "Getting #{url}"
-  noko = noko_for(url)
-  noko.css('a[href*="mp.php"]/@href').map(&:text).uniq.each do |rel_link|
-    abs_link = URI.join(url, rel_link)
-    scrape_mp(abs_link)
+class MemberName < Scraped::HTML
+  field :prefix do
+    partitioned.first.join(' ')
   end
 
-  next_page = noko.css('a[href*="mode=alps"]').find { |a| a.text.include? 'Next' }
-  scrape_list(URI.join(url, next_page.attr('href'))) if next_page
+  field :name do
+    partitioned.last.join(' ')
+  end
+
+  field :gender do
+    return 'male' if (prefixes & MALE_PREFIXES).any?
+    return 'female' if (prefixes & FEMALE_PREFIXES).any?
+  end
+
+  private
+
+  FEMALE_PREFIXES  = %w[].freeze
+  MALE_PREFIXES    = %w[].freeze
+  OTHER_PREFIXES   = %w[dr rev rt hon].freeze
+  PREFIXES         = FEMALE_PREFIXES + MALE_PREFIXES + OTHER_PREFIXES
+
+  def partitioned
+    words.partition { |w| PREFIXES.include? w.chomp('.').downcase }
+  end
+
+  def prefixes
+    partitioned.first.map { |w| w.chomp('.') }
+  end
+
+  def words
+    noko.text.split('|').first.tidy.split(/\s+/)
+  end
 end
 
-def scrape_mp(url)
-  noko = noko_for(url)
-  heading = noko.xpath('.//font[@face="Palatino Linotype"]').first
-  (name, constituency) = heading.text.strip.split(/\s+-\s+/)
-  box = noko.xpath('.//table[contains(.,"Postal addrress")]').last
-  party_info = box.css('a[href*="mode=pp"]').text
-  (party, party_id) = party_info.match(/^(.*)\s\((.*?)\)/).captures rescue (party, party_id) = [party_info, party_info]
+class MemberRow < Scraped::HTML
+  field :id do
+    name.tr(' ', '-').tr('.', '').downcase
+  end
 
-  data = { 
-    id: url.to_s[/indexc=(\d+)/, 1],
-    name: name,
-    constituency: constituency,
-    party: party,
-    party_id: party_id,
-    gender: heading.xpath('./following::i').text[/\((.)\)/,1],
-    district: box.xpath('.//td[contains(.,"District")]/following-sibling::td').text.strip,
-    tel: box.xpath('.//td[contains(.,"Phone")]/following-sibling::td').text.strip,
-    # All empty or set to 'None'
-      # address: box.xpath('.//td[contains(.,"Postal addrress")]/following-sibling::td').text.strip,
-    # All empty:
-      # email: box.xpath('.//td[contains(.,"E-mail addrress")]/following-sibling::td').text.strip,
-    term: 2014,
-    source: url.to_s,
-  }
-  ScraperWiki.save_sqlite([:id, :term], data)
+  field :name do
+    name_parts.name
+  end
+
+  field :honorific_prefix do
+    name_parts.prefix
+  end
+
+  field :image do
+    # NOT relative to this page! This page is transcluded into another one.
+    URI.join(url, '/', tds[0].css('img/@src').text).to_s
+  end
+
+  field :constituency do
+    tds[2].text.tidy
+  end
+
+  field :party do
+    tds[3].text.tidy
+  end
+
+  private
+
+  def tds
+    noko.css('td')
+  end
+
+  def name_parts
+    fragment tds[1] => MemberName
+  end
 end
 
-term = {
-  id: 2014,
-  name: '2014',
-  start_date: '2014',
-}
-ScraperWiki.save_sqlite([:id], term, 'terms')
-scrape_list('http://www.parliament.gov.mw/mps.php?mode=alps')
+starting_url = 'http://www.parliament.gov.mw/views/mp-list.php'
+data = scraper(starting_url => MembersPage).members.map(&:to_h)
+data.each { |mem| puts mem.reject { |_, v| v.to_s.empty? }.sort_by { |k, _| k }.to_h } if ENV['MORPH_DEBUG']
 
+ScraperWiki.sqliteexecute('DROP TABLE data') rescue nil
+ScraperWiki.save_sqlite(%i[id], data)
