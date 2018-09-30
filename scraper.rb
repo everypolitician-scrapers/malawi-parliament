@@ -1,16 +1,15 @@
 #!/bin/env ruby
-# encoding: utf-8
 # frozen_string_literal: true
 
 require 'pry'
 require 'scraped'
 require 'scraperwiki'
 
-# require 'open-uri/cached'
-# OpenURI::Cache.cache_path = '.cache'
+require 'open-uri/cached'
+OpenURI::Cache.cache_path = '.cache'
 
-def scraper(h)
-  url, klass = h.to_a.first
+def scraper(pair)
+  url, klass = pair.to_a.first
   klass.new(response: Scraped::Request.new(url: url).response)
 end
 
