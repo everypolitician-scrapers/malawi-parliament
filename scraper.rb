@@ -94,7 +94,7 @@ class MemberRow < Scraped::HTML
   end
 end
 
-starting_url = 'http://www.parliament.gov.mw/views/mp-list.php'
+starting_url = 'https://www.parliament.gov.mw/views/mp-list.php'
 data = scraper(starting_url => MembersPage).members.map(&:to_h)
 data.each { |mem| puts mem.reject { |_, v| v.to_s.empty? }.sort_by { |k, _| k }.to_h } if ENV['MORPH_DEBUG']
 
