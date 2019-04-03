@@ -68,7 +68,9 @@ class MemberRow < Scraped::HTML
 
   field :image do
     # NOT relative to this page! This page is transcluded into another one.
-    URI.join(url, '/', tds[0].css('img/@src').text).to_s
+    src = URI.join(url, '/', tds[0].css('img/@src').text).to_s
+    return if src.to_s.include? 'default-mp.png'
+    src
   end
 
   field :constituency do
